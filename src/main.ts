@@ -311,19 +311,19 @@ export default class CitationPlugin extends Plugin {
 
   getInitialContentForCitekey(citekey: string): string {
     return this.literatureNoteContentTemplate(
-      this.library.getTemplateVariablesForCitekey(citekey),
+      { selectedText : this.editor.getSelection(), ...this.library.getTemplateVariablesForCitekey(citekey)},
     );
   }
 
   getMarkdownCitationForCitekey(citekey: string): string {
     return this.markdownCitationTemplate(
-      this.library.getTemplateVariablesForCitekey(citekey),
+      { selectedText : this.editor.getSelection(), ...this.library.getTemplateVariablesForCitekey(citekey)},
     );
   }
 
   getAlternativeMarkdownCitationForCitekey(citekey: string): string {
     return this.alternativeMarkdownCitationTemplate(
-      this.library.getTemplateVariablesForCitekey(citekey),
+      { selectedText : this.editor.getSelection(), ...this.library.getTemplateVariablesForCitekey(citekey)},
     );
   }
 
@@ -385,7 +385,7 @@ export default class CitationPlugin extends Plugin {
           linkText = `[[${title}]]`;
         }
 
-        this.editor.replaceRange(linkText, this.editor.getCursor());
+        this.editor.replaceSelection(linkText, this.editor.getSelection());
       })
       .catch(console.error);
   }
@@ -396,7 +396,8 @@ export default class CitationPlugin extends Plugin {
    */
   async insertLiteratureNoteContent(citekey: string): Promise<void> {
     const content = this.getInitialContentForCitekey(citekey);
-    this.editor.replaceRange(content, this.editor.getCursor());
+    this.editor.getSelection()
+    this.editor.replaceSelection(content, this.editor.getSelection());
   }
 
   async insertMarkdownCitation(
@@ -408,6 +409,6 @@ export default class CitationPlugin extends Plugin {
       : this.getMarkdownCitationForCitekey;
     const citation = func.bind(this)(citekey);
 
-    this.editor.replaceRange(citation, this.editor.getCursor());
+    this.editor.replaceSelection(citation, this.editor.getSelection());
   }
 }
