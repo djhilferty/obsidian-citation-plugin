@@ -30,6 +30,7 @@ The plugin offers four simple features at the moment:
 4. **Insert Markdown citation** (no hotkey by default): insert a [Pandoc-style citation][3] for a particular reference. (The exact format of the citation can be configured in the plugin settings.)
 
 ### Templates
+
 You can set up your own template for both the title and content of literature notes. The following variables can be used:
 
 ```
@@ -48,8 +49,11 @@ You can set up your own template for both the title and content of literature no
 * {{URL}}
 * {{year}}
 * {{zoteroSelectURI}}
+* {{selectedText}}
 ```
+
 For example, your literature note title template can simply be `@{{citekey}}` and the content template can look like:
+
 ```
 ---
 title: {{title}}

@@ -70,14 +70,14 @@ export default class CitationPlugin extends Plugin {
   }
 
   async onload() {
-    console.log('CitationPlugin.onload()');
+    console.debug('CitationPlugin.onload()');
     await this.loadSettings();
     this.init();
     this.addSettingTab(new CitationSettingTab(this.app, this));
   }
 
   async init() {
-    console.log('CitationPlugin.init()');
+    console.debug('CitationPlugin.init()');
     this.library = await this.loadLibrary();
 
     // Set up a watcher to refresh whenever the export is updated
@@ -208,16 +208,16 @@ export default class CitationPlugin extends Plugin {
             break;
         }
 
-        const newLibrary = new Library(
+        const library = new Library(
           Object.fromEntries(
             entries.map((e) => [(e as IIndexable)[idKey], new adapter(e)]),
           ),
         );
         console.debug(
-          `Citation plugin: successfully loaded library with ${this.library.size} entries.`,
+          `Citation plugin: successfully loaded library with ${library.size} entries.`,
         );
 
-        return newLibrary;
+        return library;
       } catch (e) {
         console.error(e);
         this.loadErrorNotifier.show();
@@ -230,13 +230,6 @@ export default class CitationPlugin extends Plugin {
       );
     }
     return null;
-  }
-
-  /**
-   * Returns true iff the library is currently being loaded on the worker thread.
-   */
-  get isLibraryLoading(): boolean {
-    return this.loadWorker.blocked;
   }
 
   getTitleForCitekey(citekey: string): string {
