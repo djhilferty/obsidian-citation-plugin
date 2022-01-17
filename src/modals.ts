@@ -21,36 +21,36 @@ interface ChooserExt {
 class SearchModal extends FuzzySuggestModal<Entry> {
   plugin: CitationPlugin;
   limit = 50;
+  defaultText: string;
+  suggestions!: { [citekey: string]: Entry };
 
-  loadingEl: HTMLElement;
-  loadingCheckerHandle: NodeJS.Timeout;
-  // How frequently should we check whether the library is still loading?
-  loadingCheckInterval = 250;
-
-  constructor(app: App, plugin: CitationPlugin) {
+  constructor(app: App, plugin: CitationPlugin, defaultText: string = '') {
     super(app);
+
     this.plugin = plugin;
+    this.suggestions = plugin.library.entries;
 
     this.resultContainerEl.addClass('zoteroModalResults');
 
     this.inputEl.setAttribute('spellcheck', 'false');
 
-    this.loadingEl = this.resultContainerEl.parentElement.createEl('div', {
-      cls: 'zoteroModalLoading',
-    });
-    this.loadingEl.createEl('div', { cls: 'zoteroModalLoadingAnimation' });
-    this.loadingEl.createEl('p', {
-      text: 'Loading citation database. Please wait...',
-    });
+    this.defaultText = defaultText;
   }
 
-  onOpen() {
+  async onOpen() {
     super.onOpen();
 
-    this.checkLoading();
-    this.loadingCheckerHandle = setInterval(() => {
-      this.checkLoading();
-    }, this.loadingCheckInterval);
+    // Async
+    this.suggestions = this.plugin.library.entries;
+
+    // Enable input and prompt after loading
+    this.inputEl.focus();
+    this.inputEl.value = this.defaultText;
+    this.inputEl.select();
+
+    // pre-populate suggestions without typing
+    //@ts-expect-error, it's not in the type defs
+    await super.updateSuggestions();
 
     // Don't immediately register keyevent listeners. If the modal was triggered
     // by an "Enter" keystroke (e.g. via the Obsidian command dialog), this event
@@ -61,34 +61,10 @@ class SearchModal extends FuzzySuggestModal<Entry> {
     }, 200);
   }
 
-  onClose() {
-    if (this.loadingCheckerHandle) {
-      clearInterval(this.loadingCheckerHandle);
-    }
-  }
-
-  /**
-   * Check if the library is currently being loaded. If so, display animation
-   * and disable input. Otherwise hide animation and enable input.
-   */
-  checkLoading() {
-    if (this.plugin.isLibraryLoading) {
-      this.loadingEl.removeClass('d-none');
-      this.inputEl.disabled = true;
-      this.resultContainerEl.empty();
-    } else {
-      this.loadingEl.addClass('d-none');
-      this.inputEl.disabled = false;
-      this.inputEl.focus();
-    }
-  }
+  onClose() {}
 
   getItems(): Entry[] {
-    if (this.plugin.isLibraryLoading) {
-      return [];
-    }
-
-    return Object.values(this.plugin.library.entries);
+    return Object.values(this.suggestions);
   }
 
   getItemText(item: Entry): string {
@@ -102,27 +78,23 @@ class SearchModal extends FuzzySuggestModal<Entry> {
 
   renderSuggestion(match: FuzzyMatch<Entry>, el: HTMLElement): void {
     el.empty();
-    const entry = match.item;
-    const entryTitle = entry.title || '';
+    const { title = '', id, authorString } = match.item;
 
     const container = el.createEl('div', { cls: 'zoteroResult' });
     const titleEl = container.createEl('span', {
       cls: 'zoteroTitle',
     });
-    container.createEl('span', { cls: 'zoteroCitekey', text: entry.id });
+    container.createEl('span', { cls: 'zoteroCitekey', text: id });
 
-    const authorsCls = entry.authorString
-      ? 'zoteroAuthors'
-      : 'zoteroAuthors zoteroAuthorsEmpty';
     const authorsEl = container.createEl('span', {
-      cls: authorsCls,
+      cls: authorString ? 'zoteroAuthors' : 'zoteroAuthors zoteroAuthorsEmpty',
     });
 
     // Prepare to highlight string matches for each part of the search item.
     // Compute offsets of each rendered element's content within the string
     // returned by `getItemText`.
     const allMatches = match.match.matches;
-    const authorStringOffset = 1 + entryTitle.length;
+    const authorStringOffset = 1 + title.length;
 
     // Filter a match list to contain only the relevant matches for a given
     // substring, and with match indices shifted relative to the start of that
@@ -147,19 +119,15 @@ class SearchModal extends FuzzySuggestModal<Entry> {
     };
 
     // Now highlight matched strings within each element
-    renderMatches(
-      titleEl,
-      entryTitle,
-      shiftMatches(allMatches, 0, entryTitle.length),
-    );
-    if (entry.authorString) {
+    renderMatches(titleEl, title, shiftMatches(allMatches, 0, title.length));
+    if (authorString) {
       renderMatches(
         authorsEl,
-        entry.authorString,
+        authorString,
         shiftMatches(
           allMatches,
           authorStringOffset,
-          authorStringOffset + entry.authorString.length,
+          authorStringOffset + authorString.length,
         ),
       );
     }
@@ -181,8 +149,8 @@ class SearchModal extends FuzzySuggestModal<Entry> {
 }
 
 export class OpenNoteModal extends SearchModal {
-  constructor(app: App, plugin: CitationPlugin) {
-    super(app, plugin);
+  constructor(app: App, plugin: CitationPlugin, defaultText: string = '') {
+    super(app, plugin, defaultText);
 
     this.setInstructions([
       { command: '↑↓', purpose: 'to navigate' },
@@ -218,8 +186,8 @@ export class OpenNoteModal extends SearchModal {
 }
 
 export class InsertNoteLinkModal extends SearchModal {
-  constructor(app: App, plugin: CitationPlugin) {
-    super(app, plugin);
+  constructor(app: App, plugin: CitationPlugin, defaultText: string = '') {
+    super(app, plugin, defaultText);
 
     this.setInstructions([
       { command: '↑↓', purpose: 'to navigate' },
@@ -235,8 +203,8 @@ export class InsertNoteLinkModal extends SearchModal {
 }
 
 export class InsertNoteContentModal extends SearchModal {
-  constructor(app: App, plugin: CitationPlugin) {
-    super(app, plugin);
+  constructor(app: App, plugin: CitationPlugin, defaultText: string = '') {
+    super(app, plugin, defaultText);
 
     this.setInstructions([
       { command: '↑↓', purpose: 'to navigate' },
@@ -255,8 +223,8 @@ export class InsertNoteContentModal extends SearchModal {
 }
 
 export class InsertCitationModal extends SearchModal {
-  constructor(app: App, plugin: CitationPlugin) {
-    super(app, plugin);
+  constructor(app: App, plugin: CitationPlugin, defaultText: string = '') {
+    super(app, plugin, defaultText);
 
     this.setInstructions([
       { command: '↑↓', purpose: 'to navigate' },

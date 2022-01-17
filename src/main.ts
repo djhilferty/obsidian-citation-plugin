@@ -9,12 +9,11 @@ import {
 import * as path from 'path';
 import * as chokidar from 'chokidar';
 import * as CodeMirror from 'codemirror';
-
 import {
   compile as compileTemplate,
+  Exception,
   TemplateDelegate as Template,
 } from 'handlebars';
-
 import {
   InsertCitationModal,
   InsertNoteLinkModal,
@@ -22,7 +21,11 @@ import {
   OpenNoteModal,
 } from './modals';
 import { VaultExt } from './obsidian-extensions.d';
-import { CitationSettingTab, CitationsPluginSettings } from './settings';
+import {
+  CitationSettingTab,
+  CitationsPluginSettings,
+  DEFAULT_SETTINGS,
+} from './settings';
 import {
   Entry,
   EntryData,
@@ -30,14 +33,9 @@ import {
   EntryCSLAdapter,
   IIndexable,
   Library,
+  loadEntries,
 } from './types';
-import {
-  DISALLOWED_FILENAME_CHARACTERS_RE,
-  Notifier,
-  WorkerManager,
-  WorkerManagerBlocked,
-} from './util';
-import LoadWorker from 'web-worker:./worker';
+import { DISALLOWED_FILENAME_CHARACTERS_RE, Notifier } from './util';
 
 export default class CitationPlugin extends Plugin {
   settings: CitationsPluginSettings;
@@ -47,10 +45,6 @@ export default class CitationPlugin extends Plugin {
   private templateSettings = {
     noEscape: true,
   };
-
-  private loadWorker = new WorkerManager(new LoadWorker(), {
-    blockingChannel: true,
-  });
 
   loadErrorNotifier = new Notifier(
     'Unable to load citations. Please update Citations plugin settings.',
@@ -67,66 +61,47 @@ export default class CitationPlugin extends Plugin {
     return (sourceView as MarkdownSourceView).cmEditor;
   }
 
-  async loadSettings(): Promise<void> {
-    this.settings = new CitationsPluginSettings();
-
-    const loadedSettings = await this.loadData();
-    if (!loadedSettings) return;
-
-    const toLoad = [
-      'citationExportPath',
-      'citationExportFormat',
-      'literatureNoteTitleTemplate',
-      'literatureNoteFolder',
-      'literatureNoteContentTemplate',
-      'markdownCitationTemplate',
-      'alternativeMarkdownCitationTemplate',
-    ];
-    toLoad.forEach((setting) => {
-      if (setting in loadedSettings) {
-        (this.settings as IIndexable)[setting] = loadedSettings[setting];
-      }
-    });
+  async loadSettings() {
+    this.settings = { ...DEFAULT_SETTINGS, ...(await this.loadData()) };
   }
 
-  async saveSettings(): Promise<void> {
+  async saveSettings() {
     await this.saveData(this.settings);
   }
 
-  onload(): void {
-    this.loadSettings().then(() => this.init());
+  async onload() {
+    console.log('CitationPlugin.onload()');
+    await this.loadSettings();
+    this.init();
+    this.addSettingTab(new CitationSettingTab(this.app, this));
   }
 
-  async init(): Promise<void> {
-    if (this.settings.citationExportPath) {
-      // Load library for the first time
-      this.loadLibrary();
+  async init() {
+    console.log('CitationPlugin.init()');
+    this.library = await this.loadLibrary();
 
-      // Set up a watcher to refresh whenever the export is updated
-      try {
-        // Wait until files are finished being written before going ahead with
-        // the refresh -- here, we request that `change` events be accumulated
-        // until nothing shows up for 500 ms
-        // TODO magic number
-        const watchOptions = {
-          awaitWriteFinish: {
-            stabilityThreshold: 500,
-          },
-        };
+    // Set up a watcher to refresh whenever the export is updated
+    try {
+      // Wait until files are finished being written before going ahead with
+      // the refresh -- here, we request that `change` events be accumulated
+      // until nothing shows up for 500 ms
+      // TODO magic number
+      const watchOptions = {
+        awaitWriteFinish: {
+          stabilityThreshold: 500,
+        },
+      };
 
-        chokidar
-          .watch(
-            this.resolveLibraryPath(this.settings.citationExportPath),
-            watchOptions,
-          )
-          .on('change', () => {
-            this.loadLibrary();
-          });
-      } catch {
-        this.loadErrorNotifier.show();
-      }
-    } else {
-      // TODO show warning?
+      chokidar
+        .watch(
+          this.resolveLibraryPath(this.settings.citationExportPath),
+          watchOptions,
+        )
+        .on('change', async () => {
+          this.library = await this.loadLibrary();
+        });
+    } catch {
+      this.loadErrorNotifier.show();
     }
 
     this.addCommand({
@@ -134,7 +109,11 @@ export default class CitationPlugin extends Plugin {
       name: 'Open literature note',
       hotkeys: [{ modifiers: ['Ctrl', 'Shift'], key: 'o' }],
       callback: () => {
-        const modal = new OpenNoteModal(this.app, this);
+        const modal = new OpenNoteModal(
+          this.app,
+          this,
+          this.editor.getSelection(),
+        );
         modal.open();
       },
     });
@@ -143,8 +122,8 @@ export default class CitationPlugin extends Plugin {
       id: 'update-bib-data',
       name: 'Refresh citation database',
       hotkeys: [{ modifiers: ['Ctrl', 'Shift'], key: 'r' }],
-      callback: () => {
-        this.loadLibrary();
+      callback: async () => {
+        this.library = await this.loadLibrary();
       },
     });
 
@@ -153,7 +132,11 @@ export default class CitationPlugin extends Plugin {
       name: 'Insert literature note link',
       hotkeys: [{ modifiers: ['Ctrl', 'Shift'], key: 'e' }],
       callback: () => {
-        const modal = new InsertNoteLinkModal(this.app, this);
+        const modal = new InsertNoteLinkModal(
+          this.app,
+          this,
+          this.editor.getSelection(),
+        );
         modal.open();
       },
     });
@@ -162,7 +145,11 @@ export default class CitationPlugin extends Plugin {
       id: 'insert-literature-note-content',
       name: 'Insert literature note content in the current pane',
       callback: () => {
-        const modal = new InsertNoteContentModal(this.app, this);
+        const modal = new InsertNoteContentModal(
+          this.app,
+          this,
+          this.editor.getSelection(),
+        );
         modal.open();
       },
     });
@@ -171,12 +158,14 @@ export default class CitationPlugin extends Plugin {
       id: 'insert-markdown-citation',
       name: 'Insert Markdown citation',
       callback: () => {
-        const modal = new InsertCitationModal(this.app, this);
+        const modal = new InsertCitationModal(
+          this.app,
+          this,
+          this.editor.getSelection(),
+        );
         modal.open();
       },
     });
-
-    this.addSettingTab(new CitationSettingTab(this.app, this));
   }
 
   /**
@@ -198,67 +187,49 @@ export default class CitationPlugin extends Plugin {
         this.settings.citationExportPath,
       );
 
-      // Unload current library.
-      this.library = null;
+      try {
+        let buffer = await FileSystemAdapter.readLocalFile(filePath);
+        const dataView = new DataView(buffer);
+        const decoder = new TextDecoder('utf8');
+        const value = decoder.decode(dataView);
 
-      return FileSystemAdapter.readLocalFile(filePath)
-        .then((buffer) => {
-          // If there is a remaining error message, hide it
-          this.loadErrorNotifier.hide();
+        let entries = loadEntries(value, this.settings.citationExportFormat);
+        let adapter: new (data: EntryData) => Entry;
+        let idKey: string;
 
-          // Decode file as UTF-8.
-          const dataView = new DataView(buffer);
-          const decoder = new TextDecoder('utf8');
-          const value = decoder.decode(dataView);
+        switch (this.settings.citationExportFormat) {
+          case 'biblatex':
+            adapter = EntryBibLaTeXAdapter;
+            idKey = 'key';
+            break;
+          case 'csl-json':
+            adapter = EntryCSLAdapter;
+            idKey = 'id';
+            break;
+        }
 
-          return this.loadWorker.post({
-            databaseRaw: value,
-            databaseType: this.settings.citationExportFormat,
-          });
-        })
-        .then((entries: EntryData[]) => {
-          let adapter: new (data: EntryData) => Entry;
-          let idKey: string;
+        const newLibrary = new Library(
+          Object.fromEntries(
+            entries.map((e) => [(e as IIndexable)[idKey], new adapter(e)]),
+          ),
+        );
+        console.debug(
+          `Citation plugin: successfully loaded library with ${this.library.size} entries.`,
+        );
 
-          switch (this.settings.citationExportFormat) {
-            case 'biblatex':
-              adapter = EntryBibLaTeXAdapter;
-              idKey = 'key';
-              break;
-            case 'csl-json':
-              adapter = EntryCSLAdapter;
-              idKey = 'id';
-              break;
-          }
+        return newLibrary;
+      } catch (e) {
+        console.error(e);
+        this.loadErrorNotifier.show();
 
-          this.library = new Library(
-            Object.fromEntries(
-              entries.map((e) => [(e as IIndexable)[idKey], new adapter(e)]),
-            ),
-          );
-          console.debug(
-            `Citation plugin: successfully loaded library with ${this.library.size} entries.`,
-          );
-
-          return this.library;
-        })
-        .catch((e) => {
-          if (e instanceof WorkerManagerBlocked) {
-            // Silently catch WorkerManager error, which will be thrown if the
-            // library is already being loaded
-            return;
-          }
-
-          console.error(e);
-          this.loadErrorNotifier.show();
-
-          return null;
-        });
+        return null;
+      }
     } else {
       console.warn(
         'Citations plugin: citation export path is not set. Please update plugin settings.',
       );
     }
+    return null;
   }
 
   /**
@@ -268,38 +239,11 @@ export default class CitationPlugin extends Plugin {
     return this.loadWorker.blocked;
   }
 
-  get literatureNoteTitleTemplate(): Template {
-    return compileTemplate(
+  getTitleForCitekey(citekey: string): string {
+    const unsafeTitle = compileTemplate(
       this.settings.literatureNoteTitleTemplate,
       this.templateSettings,
-    );
-  }
-
-  get literatureNoteContentTemplate(): Template {
-    return compileTemplate(
-      this.settings.literatureNoteContentTemplate,
-      this.templateSettings,
-    );
-  }
-
-  get markdownCitationTemplate(): Template {
-    return compileTemplate(
-      this.settings.markdownCitationTemplate,
-      this.templateSettings,
-    );
-  }
-
-  get alternativeMarkdownCitationTemplate(): Template {
-    return compileTemplate(
-      this.settings.alternativeMarkdownCitationTemplate,
-      this.templateSettings,
-    );
-  }
-
-  getTitleForCitekey(citekey: string): string {
-    const unsafeTitle = this.literatureNoteTitleTemplate(
-      this.library.getTemplateVariablesForCitekey(citekey),
-    );
+    )(this.library.getTemplateVariablesForCitekey(citekey));
     return unsafeTitle.replace(DISALLOWED_FILENAME_CHARACTERS_RE, '_');
   }
 
@@ -310,21 +254,33 @@ export default class CitationPlugin extends Plugin {
   }
 
   getInitialContentForCitekey(citekey: string): string {
-    return this.literatureNoteContentTemplate(
-      { selectedText : this.editor.getSelection(), ...this.library.getTemplateVariablesForCitekey(citekey)},
-    );
+    return compileTemplate(
+      this.settings.literatureNoteContentTemplate,
+      this.templateSettings,
+    )({
+      selectedText: this.editor.getSelection(),
+      ...this.library.getTemplateVariablesForCitekey(citekey),
+    });
   }
 
   getMarkdownCitationForCitekey(citekey: string): string {
-    return this.markdownCitationTemplate(
-      { selectedText : this.editor.getSelection(), ...this.library.getTemplateVariablesForCitekey(citekey)},
-    );
+    return compileTemplate(
+      this.settings.markdownCitationTemplate,
+      this.templateSettings,
+    )({
+      selectedText: this.editor.getSelection(),
+      ...this.library.getTemplateVariablesForCitekey(citekey),
+    });
   }
 
   getAlternativeMarkdownCitationForCitekey(citekey: string): string {
-    return this.alternativeMarkdownCitationTemplate(
-      { selectedText : this.editor.getSelection(), ...this.library.getTemplateVariablesForCitekey(citekey)},
-    );
+    return compileTemplate(
+      this.settings.alternativeMarkdownCitationTemplate,
+      this.templateSettings,
+    )({
+      selectedText: this.editor.getSelection(),
+      ...this.library.getTemplateVariablesForCitekey(citekey),
+    });
   }
 
   /**
@@ -359,7 +315,7 @@ export default class CitationPlugin extends Plugin {
     return file as TFile;
   }
 
-  async openLiteratureNote(citekey: string, newPane: boolean): Promise<void> {
+  async openLiteratureNote(citekey: string, newPane: boolean) {
     this.getOrCreateLiteratureNoteFile(citekey)
       .then((file: TFile) => {
         this.app.workspace.getLeaf(newPane).openFile(file);
@@ -367,7 +323,7 @@ export default class CitationPlugin extends Plugin {
       .catch(console.error);
   }
 
-  async insertLiteratureNoteLink(citekey: string): Promise<void> {
+  async insertLiteratureNoteLink(citekey: string) {
     this.getOrCreateLiteratureNoteFile(citekey)
       .then((file: TFile) => {
         const useMarkdown: boolean = (<VaultExt>this.app.vault).getConfig(
@@ -394,16 +350,13 @@ export default class CitationPlugin extends Plugin {
    * Format literature note content for a given reference and insert in the
    * currently active pane.
    */
-  async insertLiteratureNoteContent(citekey: string): Promise<void> {
+  async insertLiteratureNoteContent(citekey: string) {
     const content = this.getInitialContentForCitekey(citekey);
-    this.editor.getSelection()
+    this.editor.getSelection();
     this.editor.replaceSelection(content, this.editor.getSelection());
   }
 
-  async insertMarkdownCitation(
-    citekey: string,
-    alternative = false,
-  ): Promise<void> {
+  async insertMarkdownCitation(citekey: string, alternative = false) {
     const func = alternative
       ? this.getAlternativeMarkdownCitationForCitekey
       : this.getMarkdownCitationForCitekey;

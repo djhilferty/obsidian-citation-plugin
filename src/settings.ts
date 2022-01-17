@@ -15,21 +15,29 @@ const CITATION_DATABASE_FORMAT_LABELS: Record<DatabaseType, string> = {
   biblatex: 'BibLaTeX',
 };
 
-export class CitationsPluginSettings {
-  public citationExportPath: string;
-  citationExportFormat: DatabaseType = 'csl-json';
+export interface CitationsPluginSettings {
+  citationExportPath: string;
+  citationExportFormat : DatabaseType;
 
-  literatureNoteTitleTemplate = '@{{citekey}}';
-  literatureNoteFolder = 'Reading notes';
-  literatureNoteContentTemplate: string =
-    '---\n' +
-    'title: {{title}}\n' +
-    'authors: {{authorString}}\n' +
-    'year: {{year}}\n' +
-    '---\n\n';
+  literatureNoteTitleTemplate : string;
+  literatureNoteFolder : string;
+  literatureNoteContentTemplate: string,
+  markdownCitationTemplate : string;
+  alternativeMarkdownCitationTemplate : string;
+}
 
-  markdownCitationTemplate = '[@{{citekey}}]';
-  alternativeMarkdownCitationTemplate = '@{{citekey}}';
+export const DEFAULT_SETTINGS: Partial<CitationsPluginSettings> = {
+  citationExportFormat : 'csl-json',
+  literatureNoteTitleTemplate : '@{{citekey}}',
+  literatureNoteFolder : 'Reading notes',
+  literatureNoteContentTemplate:
+    "---\n\
+    title: {{title}}\n\
+    authors: {{authorString}}\n\
+    year: {{year}}\n\
+    ---\n\n",
+  markdownCitationTemplate : '[@{{citekey}}]',
+  alternativeMarkdownCitationTemplate : '@{{citekey}}',
 }
 
 export class CitationSettingTab extends PluginSettingTab {
