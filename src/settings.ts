@@ -17,28 +17,28 @@ const CITATION_DATABASE_FORMAT_LABELS: Record<DatabaseType, string> = {
 
 export interface CitationsPluginSettings {
   citationExportPath: string;
-  citationExportFormat : DatabaseType;
+  citationExportFormat: DatabaseType;
 
-  literatureNoteTitleTemplate : string;
-  literatureNoteFolder : string;
-  literatureNoteContentTemplate: string,
-  markdownCitationTemplate : string;
-  alternativeMarkdownCitationTemplate : string;
+  literatureNoteTitleTemplate: string;
+  literatureNoteFolder: string;
+  literatureNoteContentTemplate: string;
+  markdownCitationTemplate: string;
+  alternativeMarkdownCitationTemplate: string;
 }
 
 export const DEFAULT_SETTINGS: Partial<CitationsPluginSettings> = {
-  citationExportFormat : 'csl-json',
-  literatureNoteTitleTemplate : '@{{citekey}}',
-  literatureNoteFolder : 'Reading notes',
+  citationExportFormat: 'csl-json',
+  literatureNoteTitleTemplate: '@{{citekey}}',
+  literatureNoteFolder: 'Reading notes',
   literatureNoteContentTemplate:
-    "---\n\
+    '---\n\
     title: {{title}}\n\
     authors: {{authorString}}\n\
     year: {{year}}\n\
-    ---\n\n",
-  markdownCitationTemplate : '[@{{citekey}}]',
-  alternativeMarkdownCitationTemplate : '@{{citekey}}',
-}
+    ---\n\n',
+  markdownCitationTemplate: '[@{{citekey}}]',
+  alternativeMarkdownCitationTemplate: '@{{citekey}}',
+};
 
 export class CitationSettingTab extends PluginSettingTab {
   private plugin: CitationPlugin;

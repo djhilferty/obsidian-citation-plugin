@@ -30,6 +30,7 @@ export const TEMPLATE_VARIABLES = {
   URL: '',
   year: 'Publication year',
   zoteroSelectURI: 'URI to open the reference in Zotero',
+  selectedText: 'Text selected by user when insert event is triggered.',
 };
 
 export class Library {
